@@ -4,26 +4,21 @@ from datetime import datetime
 from fastapi import FastAPI, Request
 from fastapi.responses import RedirectResponse
 from telegram import Update, Bot
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    ContextTypes,
-)
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
 # === ԿԱՐԳԱՎՈՐՈՒՄՆԵՐ ===
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "8542625753:AAFS4Hd7gNCm8_KbjX-biMAf2HIkN-pApc4")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8542625753:AAFS4Hd7gNCm8_KbjX-biMAf2HIkN-pApc4")  # այստեղ դիր քո բոտի token-ը
 ADMINS = [int(x) for x in os.environ.get("ADMINS", "6517716621,1105827301").split(",")]
-
-# Redirect base link
 SHORT_BASE = "https://poputi-live.onrender.com"
 
-# Հղումներ ըստ սարքի
-ANDROID_URL = "https://play.google.com/store/apps/details?id=poputi.app"
-IOS_URL = "https://apps.apple.com/app/idXXXXXXXX"  # փոխիր իրական iOS հղմամբ
+# ✅ ԱՅՍԵՐԸ փոխիր իրական հղումներով
+ANDROID_URL = "https://play.google.com/store/apps/details?id=com.poputi.passenger"
+IOS_URL = "https://apps.apple.com/am/app/poputi/id654321987"
 WEB_URL = "https://poputi.am"
 
 bot = Bot(token=BOT_TOKEN)
 app = FastAPI()
+
 
 # === ՏՎՅԱԼՆԵՐԻ ԲԱԶԱ ===
 def init_db():
@@ -38,7 +33,6 @@ def init_db():
                     username TEXT,
                     first_name TEXT,
                     last_name TEXT,
-                    start_param TEXT,
                     timestamp TEXT
                 )
             """)
@@ -58,117 +52,91 @@ def init_db():
 init_db()
 
 
-# === FASTAPI - Redirect logic ===
+# === REDIRECT ՄԱՍ ===
 @app.get("/")
-async def redirect_user(request: Request, uid: str | None = None):
+async def redirect_user(request: Request, uid: str = None):
     ua = (request.headers.get("user-agent") or "").lower()
     ip = request.client.host or "unknown"
     ts = datetime.utcnow().isoformat()
 
+    # պահում ենք click-ը բազայում
     conn = sqlite3.connect("clicks.db")
     cur = conn.cursor()
-    cur.execute(
-        "INSERT INTO clicks (uid, ip, ua, timestamp) VALUES (?, ?, ?, ?)",
-        (uid, ip, ua, ts),
-    )
+    cur.execute("INSERT INTO clicks (uid, ip, ua, timestamp) VALUES (?, ?, ?, ?)",
+                (uid, ip, ua, ts))
     conn.commit()
     conn.close()
 
-    # սարքից կախված URL
+    # սարքի ստուգում
     if "android" in ua:
         final_url = ANDROID_URL
-    elif "iphone" in ua or "ipad" in ua or "ios" in ua:
+    elif "iphone" in ua or "ipad" in ua:
         final_url = IOS_URL
     else:
         final_url = WEB_URL
 
-    msg = (
-        f"🔔 Նոր հղման սեղմում\n"
-        f"UID: {uid}\n"
-        f"IP: {ip}\n"
-        f"UA: {ua}\n"
-        f"Time(UTC): {ts}"
-    )
+    # ծանուցում ադմիններին
+    msg = f"🔔 Նոր հղման սեղմում\nUID: {uid}\nIP: {ip}\nTime: {ts}"
     for admin_id in ADMINS:
         try:
             await bot.send_message(chat_id=admin_id, text=msg)
-        except Exception as e:
-            print(f"Can't notify admin {admin_id}: {e}")
+        except Exception:
+            pass
 
-    return RedirectResponse(url=final_url, status_code=302)
+    return RedirectResponse(url=final_url)
 
 
-# === TELEGRAM ԲՈՏ (Webhook տարբերակ) ===
+# === ԲՈՏԻ ՄԱՍ ===
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    start_param = context.args[0] if context.args else None
 
+    # պահպանում ենք բազայում
     conn = sqlite3.connect("visits.db")
     cur = conn.cursor()
     cur.execute("""
-        INSERT INTO visits (user_id, username, first_name, last_name, start_param, timestamp)
-        VALUES (?, ?, ?, ?, ?, ?)
-    """, (
-        user.id,
-        user.username,
-        user.first_name,
-        user.last_name,
-        start_param,
-        datetime.utcnow().isoformat(),
-    ))
+        INSERT INTO visits (user_id, username, first_name, last_name, timestamp)
+        VALUES (?, ?, ?, ?, ?)
+    """, (user.id, user.username, user.first_name, user.last_name, datetime.utcnow().isoformat()))
     conn.commit()
     conn.close()
 
-    admin_msg = (
-        f"🟢 Նոր մուտք բոտում\n"
-        f"👤 @{user.username or '—'} (ID: {user.id})\n"
-        f"Անուն: {user.first_name or ''} {user.last_name or ''}\n"
-        f"Time(UTC): {datetime.utcnow().isoformat()}"
-    )
-    for admin in ADMINS:
+    # ադմինին ծանուցում
+    for admin_id in ADMINS:
         try:
-            await context.bot.send_message(chat_id=admin, text=admin_msg)
-        except Exception as e:
-            print(f"Can't notify admin {admin}: {e}")
+            await context.bot.send_message(
+                chat_id=admin_id,
+                text=f"🟢 Նոր user մուտք գործեց բոտ\n@{user.username or '—'} (ID: {user.id})"
+            )
+        except Exception:
+            pass
 
-    text = (
+    # ուղարկում ենք հղումը
+    link = f"{SHORT_BASE}?uid={user.id}"
+    await update.message.reply_text(
         f"Բարև {user.first_name or user.username or 'օգտատեր'} 👋\n"
-        f"Հավելվածը բացելու համար սեղմիր 👉 {SHORT_BASE}?uid={user.id}"
+        f"Հավելվածը ներբեռնելու կամ բացելու համար սեղմիր 👉 {link}"
     )
-    await update.message.reply_text(text)
-
-
-def setup_webhook_app() -> Application:
-    """Ստեղծում է Telegram բոտը webhook ռեժիմով"""
-    application = Application.builder().token(BOT_TOKEN).build()
-    application.add_handler(CommandHandler("start", start))
-    return application
-
-
-telegram_app = setup_webhook_app()
-
-
-@app.post("/webhook")
-async def telegram_webhook(request: Request):
-    """Telegram-ի update-ները գալիս են այստեղ"""
-    body = await request.json()
-    update = Update.de_json(body, telegram_app.bot)
-    await telegram_app.process_update(update)
-    return {"ok": True}
-
-
-@app.on_event("startup")
-async def on_startup():
-    """Միացնում է webhook-ը Telegram-ում"""
-    webhook_url = f"{SHORT_BASE}/webhook"
-    await bot.set_webhook(webhook_url)
-    print(f"✅ Webhook set: {webhook_url}")
 
 
 # === ԳԼԽԱՎՈՐ ===
-if __name__ == "__main__":
+def main():
     import uvicorn
+    app_tg = ApplicationBuilder().token(BOT_TOKEN).build()
+    app_tg.add_handler(CommandHandler("start", start))
+
+    # asyncio չօգտագործող պարզ տարբերակ
+    from threading import Thread
+
+    def run_tg():
+        app_tg.run_polling()
+
+    Thread(target=run_tg).start()
     uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
+
+
+if __name__ == "__main__":
+    main()
+
 
 
 
