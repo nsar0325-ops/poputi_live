@@ -1,9 +1,9 @@
 import asyncio
+import os
 import sqlite3
 from datetime import datetime
-import os
 import pytz
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 from telegram import Update, Bot
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
@@ -12,13 +12,13 @@ import uvicorn
 # === ԿԱՐԳԱՎՈՐՈՒՄՆԵՐ ===
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8542625753:AAFS4Hd7gNCm8_KbjX-biMAf2HIkN-pApc4")
 ADMINS = [int(x) for x in os.environ.get("ADMINS", "6517716621,1105827301").split(",")]
-BASE_URL = "https://poputi-live.onrender.com"
-
-bot = Bot(token=BOT_TOKEN)
+BASE_URL = "https://short.poputi.am"
 AM_TZ = pytz.timezone("Asia/Yerevan")
 
+bot = Bot(token=BOT_TOKEN)
+
+# === ԺԱՄԱՆԱԿ ===
 def get_armenia_time():
-    """Բերում է Հայաստանի ժամային գոտու ընթացիկ ժամանակը"""
     return datetime.now(pytz.utc).astimezone(AM_TZ).strftime("%Y-%m-%d %H:%M:%S")
 
 # === ՏՎՅԱԼՆԵՐԻ ԲԱԶԱ ===
@@ -35,15 +35,6 @@ def init_db():
             timestamp TEXT
         )
     """)
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS clicks (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            uid TEXT,
-            ip TEXT,
-            ua TEXT,
-            timestamp TEXT
-        )
-    """)
     conn.commit()
     conn.close()
 
@@ -52,69 +43,24 @@ init_db()
 # === FASTAPI APP ===
 app = FastAPI()
 
-@app.get("/")
-async def redirect_user(request: Request, uid: str = None):
-    """Գրանցում է հղման սեղմումը և բացում Poputi հավելվածը կամ store-ը"""
-    ip = request.client.host
-    ua = request.headers.get("user-agent", "").lower()
-    ts = get_armenia_time()
-
-    # Բազայում պահպանում ենք սեղմումը
-    conn = sqlite3.connect("main.db")
-    cur = conn.cursor()
-    cur.execute("INSERT INTO clicks (uid, ip, ua, timestamp) VALUES (?, ?, ?, ?)", (uid, ip, ua, ts))
-    conn.commit()
-    conn.close()
-
-    msg = f"🔔 Նոր հղման սեղմում!\n🆔 User ID: {uid or 'Չկա'}\n🌍 IP: {ip}\n🕒 Ժամանակ՝ {ts}"
-    for admin in ADMINS:
-        try:
-            await bot.send_message(chat_id=admin, text=msg)
-        except Exception as e:
-            print(f"Can't notify admin {admin}: {e}")
-
-    # Device detection
-    if "android" in ua:
-        app_link = "poputi://open"
-        fallback = "https://play.google.com/store/apps/details?id=com.poputi.share4car"
-    elif "iphone" in ua or "ipad" in ua:
-        app_link = "poputi://open"
-        fallback = "https://apps.apple.com/am/app/poputi-am/id6478853444"
-    else:
-        app_link = "https://poputi.am"
-        fallback = "https://poputi.am"
-
-    # HTML պատասխան՝ բացելու փորձ հավելվածը
-    html = f"""
+@app.get("/", response_class=HTMLResponse)
+async def home():
+    return HTMLResponse("""
     <html>
-    <head>
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Poputi</title>
-        <script>
-            function openApp() {{
-                window.location = "{app_link}?uid={uid or '0'}";
-                setTimeout(function() {{
-                    window.location = "{fallback}";
-                }}, 1500);
-            }}
-            window.onload = openApp;
-        </script>
-    </head>
-    <body style="text-align:center; font-family:Arial; margin-top:60px;">
-        <h2>Բացում ենք Poputi հավելվածը...</h2>
-        <p>Եթե ավտոմատ չբացվի, սեղմիր <a href="{fallback}">այստեղ</a>.</p>
+    <head><title>Poputi Live</title></head>
+    <body style='text-align:center; font-family:Arial; margin-top:60px;'>
+        <h2>✅ Poputi Bot Live է</h2>
+        <p>Բոտը հաջողությամբ աշխատում է Render-ի վրա։</p>
     </body>
     </html>
-    """
-    return HTMLResponse(content=html)
-
+    """)
 
 # === TELEGRAM ԲՈՏ ===
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Գրանցում է օգտատիրոջ մուտքը և ուղարկում է հղումը"""
     user = update.effective_user
     ts = get_armenia_time()
 
+    # Գրանցում բազայում
     conn = sqlite3.connect("main.db")
     cur = conn.cursor()
     cur.execute("""
@@ -124,7 +70,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn.commit()
     conn.close()
 
-    msg = (
+    # Ծանուցում ադմիններին
+    admin_msg = (
         f"🟢 Նոր մուտք Telegram բոտում\n"
         f"👤 @{user.username or 'առանց username'} (ID: {user.id})\n"
         f"Անուն: {user.first_name or ''} {user.last_name or ''}\n"
@@ -132,30 +79,33 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     for admin in ADMINS:
         try:
-            await bot.send_message(chat_id=admin, text=msg)
+            await bot.send_message(chat_id=admin, text=admin_msg)
         except Exception as e:
             print(f"Can't notify admin {admin}: {e}")
 
+    # Պատասխան օգտատիրոջը
     text = (
-        f"Բարև {user.first_name or user.username or 'օգտատեր'} 👋\n\n"
-        f"Poputi հավելվածը բացելու համար սեղմիր 👉 {BASE_URL}?uid={user.id}"
+        f"Բարև {user.first_name or 'օգտատեր'} 👋\n\n"
+        f"Հավելվածը բացելու համար սեղմիր 👉 {BASE_URL}"
     )
     await update.message.reply_text(text)
 
-
-# === ԳԼԽԱՎՈՐ ===
+# === ԳԼԽԱՎՈՐ ՖՈՒՆԿՑԻԱ ===
 async def run_bot():
     app_builder = ApplicationBuilder().token(BOT_TOKEN).build()
     app_builder.add_handler(CommandHandler("start", start))
-    await app_builder.run_polling(close_loop=False)
+    await app_builder.run_polling()
+
+async def main():
+    bot_task = asyncio.create_task(run_bot())
+    server_task = asyncio.create_task(
+        uvicorn.Server(
+            uvicorn.Config(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
+        ).serve()
+    )
+    await asyncio.gather(bot_task, server_task)
 
 if __name__ == "__main__":
-    async def main():
-        bot_task = asyncio.create_task(run_bot())
-        server_task = asyncio.create_task(
-            uvicorn.Server(
-                uvicorn.Config(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
-            ).serve()
-        )
-        await asyncio.gather(bot_task, server_task)
     asyncio.run(main())
+
+
