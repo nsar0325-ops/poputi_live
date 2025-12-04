@@ -4,7 +4,7 @@ from datetime import datetime
 import os
 import pytz
 from fastapi import FastAPI, Request
-from fastapi.responses import RedirectResponse, HTMLResponse
+from fastapi.responses import HTMLResponse
 from telegram import Update, Bot
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 import uvicorn
@@ -17,13 +17,9 @@ BASE_URL = "https://poputi-live.onrender.com"
 bot = Bot(token=BOT_TOKEN)
 AM_TZ = pytz.timezone("Asia/Yerevan")
 
-
 def get_armenia_time():
-    """Վերադարձնում է Հայաստանի ընթացիկ ժամը ճիշտ ձևաչափով"""
-    utc_now = datetime.utcnow().replace(tzinfo=pytz.utc)
-    now_am = utc_now.astimezone(AM_TZ)
-    return now_am.strftime("%Y-%m-%d %H:%M:%S")
-
+    """Բերում է Հայաստանի ժամային գոտու ընթացիկ ժամանակը"""
+    return datetime.now(pytz.utc).astimezone(AM_TZ).strftime("%Y-%m-%d %H:%M:%S")
 
 # === ՏՎՅԱԼՆԵՐԻ ԲԱԶԱ ===
 def init_db():
@@ -51,28 +47,25 @@ def init_db():
     conn.commit()
     conn.close()
 
-
 init_db()
 
 # === FASTAPI APP ===
 app = FastAPI()
 
-
 @app.get("/")
 async def redirect_user(request: Request, uid: str = None):
-    """Գրանցում է հղման սեղմումը և բացում Poputi հավելվածը կամ կայքը"""
+    """Գրանցում է հղման սեղմումը և բացում Poputi հավելվածը կամ store-ը"""
     ip = request.client.host
-    ua = request.headers.get("user-agent", "unknown").lower()
+    ua = request.headers.get("user-agent", "").lower()
     ts = get_armenia_time()
 
-    # գրանցում բազայում
+    # Բազայում պահպանում ենք սեղմումը
     conn = sqlite3.connect("main.db")
     cur = conn.cursor()
     cur.execute("INSERT INTO clicks (uid, ip, ua, timestamp) VALUES (?, ?, ?, ?)", (uid, ip, ua, ts))
     conn.commit()
     conn.close()
 
-    # ծանուցում ադմիններին
     msg = f"🔔 Նոր հղման սեղմում!\n🆔 User ID: {uid or 'Չկա'}\n🌍 IP: {ip}\n🕒 Ժամանակ՝ {ts}"
     for admin in ADMINS:
         try:
@@ -80,41 +73,40 @@ async def redirect_user(request: Request, uid: str = None):
         except Exception as e:
             print(f"Can't notify admin {admin}: {e}")
 
-    # սարքի որոշում
+    # Device detection
     if "android" in ua:
-        # Android intent link
-        deeplink = (
-            f"intent://open?uid={uid or '0'}#Intent;"
-            "scheme=poputi;"
-            "package=com.poputi.share4car;"
-            "S.browser_fallback_url=https://play.google.com/store/apps/details?id=com.poputi.share4car;"
-            "end"
-        )
-        return RedirectResponse(url=deeplink)
-
+        app_link = "poputi://open"
+        fallback = "https://play.google.com/store/apps/details?id=com.poputi.share4car"
     elif "iphone" in ua or "ipad" in ua:
-        # iOS deep link + fallback
-        deeplink = f"poputi://open?uid={uid or '0'}"
-        html = f"""
-        <html>
-        <head>
-            <meta http-equiv="refresh" content="0; url={deeplink}" />
-            <script>
-                setTimeout(function(){{
-                    window.location.href = "https://apps.apple.com/am/app/poputi-am/id6478853444";
-                }}, 1500);
-            </script>
-        </head>
-        <body style='font-family:Arial; text-align:center; margin-top:50px;'>
-            <h3>Բացում ենք Poputi հավելվածը...</h3>
-        </body>
-        </html>
-        """
-        return HTMLResponse(content=html)
-
+        app_link = "poputi://open"
+        fallback = "https://apps.apple.com/am/app/poputi-am/id6478853444"
     else:
-        # desktop սարքերի համար
-        return RedirectResponse(url="https://poputi.am")
+        app_link = "https://poputi.am"
+        fallback = "https://poputi.am"
+
+    # HTML պատասխան՝ բացելու փորձ հավելվածը
+    html = f"""
+    <html>
+    <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Poputi</title>
+        <script>
+            function openApp() {{
+                window.location = "{app_link}?uid={uid or '0'}";
+                setTimeout(function() {{
+                    window.location = "{fallback}";
+                }}, 1500);
+            }}
+            window.onload = openApp;
+        </script>
+    </head>
+    <body style="text-align:center; font-family:Arial; margin-top:60px;">
+        <h2>Բացում ենք Poputi հավելվածը...</h2>
+        <p>Եթե ավտոմատ չբացվի, սեղմիր <a href="{fallback}">այստեղ</a>.</p>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html)
 
 
 # === TELEGRAM ԲՈՏ ===
@@ -123,7 +115,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     ts = get_armenia_time()
 
-    # պահպանում բազայում
     conn = sqlite3.connect("main.db")
     cur = conn.cursor()
     cur.execute("""
@@ -133,7 +124,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn.commit()
     conn.close()
 
-    # ծանուցում ադմիններին
     msg = (
         f"🟢 Նոր մուտք Telegram բոտում\n"
         f"👤 @{user.username or 'առանց username'} (ID: {user.id})\n"
@@ -146,12 +136,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             print(f"Can't notify admin {admin}: {e}")
 
-    # հղումը դեպի հավելված կամ կայք
     text = (
         f"Բարև {user.first_name or user.username or 'օգտատեր'} 👋\n\n"
         f"Poputi հավելվածը բացելու համար սեղմիր 👉 {BASE_URL}?uid={user.id}"
     )
-
     await update.message.reply_text(text)
 
 
@@ -160,7 +148,6 @@ async def run_bot():
     app_builder = ApplicationBuilder().token(BOT_TOKEN).build()
     app_builder.add_handler(CommandHandler("start", start))
     await app_builder.run_polling(close_loop=False)
-
 
 if __name__ == "__main__":
     async def main():
@@ -171,7 +158,7 @@ if __name__ == "__main__":
             ).serve()
         )
         await asyncio.gather(bot_task, server_task)
-
     asyncio.run(main())
+
 
 
