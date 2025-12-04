@@ -11,7 +11,7 @@ import uvicorn
 
 # === ԿԱՐԳԱՎՈՐՈՒՄՆԵՐ ===
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8542625753:AAFS4Hd7gNCm8_KbjX-biMAf2HIkN-pApc4")
-ADMINS = [int(x) for x in os.environ.get("ADMINS", "6517716621,1105827301").split(",")]
+ADMINS = [int(x) for x in os.environ.get("ADMINS", "6517716621,1105827301").split(",") if x.strip()]
 BASE_URL = "https://short.poputi.am"
 AM_TZ = pytz.timezone("Asia/Yerevan")
 
@@ -59,6 +59,7 @@ async def home():
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     ts = get_armenia_time()
+    print(f"👤 Նոր մուտք՝ {user.first_name} | ID: {user.id}")
 
     # Բազայում գրանցում
     conn = sqlite3.connect("main.db")
@@ -77,11 +78,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Անուն: {user.first_name or ''} {user.last_name or ''}\n"
         f"🕒 Ժամանակ՝ {ts}"
     )
+
     for admin in ADMINS:
         try:
+            print(f"📨 Փորձում եմ ուղարկել ծանուցում admin {admin}-ին...")
             await bot.send_message(chat_id=admin, text=admin_msg)
+            print(f"✅ Ծանուցումը հաջողությամբ ուղարկվեց {admin}-ին")
         except Exception as e:
-            print(f"Can't notify admin {admin}: {e}")
+            print(f"❌ Չհաջողվեց ուղարկել {admin}-ին։ Սխալ՝ {e}")
 
     # Պատասխան օգտատիրոջը
     text = (
@@ -89,6 +93,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Հավելվածը բացելու համար սեղմիր 👉 {BASE_URL}"
     )
     await update.message.reply_text(text)
+    print(f"📤 Պատասխան ուղարկվեց {user.id}-ին։")
 
 # === ԳԼԽԱՎՈՐ ՖՈՒՆԿՑԻԱՆԵՐ ===
 async def start_bot():
@@ -113,6 +118,7 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
 
 
