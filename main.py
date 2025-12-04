@@ -60,7 +60,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     ts = get_armenia_time()
 
-    # Գրանցում բազայում
+    # Բազայում գրանցում
     conn = sqlite3.connect("main.db")
     cur = conn.cursor()
     cur.execute("""
@@ -90,22 +90,29 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await update.message.reply_text(text)
 
-# === ԳԼԽԱՎՈՐ ՖՈՒՆԿՑԻԱ ===
-async def run_bot():
+# === ԳԼԽԱՎՈՐ ՖՈՒՆԿՑԻԱՆԵՐ ===
+async def start_bot():
+    """Բոտը գործարկվում է առանձին asyncio task-ում առանց event loop փակելու"""
     app_builder = ApplicationBuilder().token(BOT_TOKEN).build()
     app_builder.add_handler(CommandHandler("start", start))
-    await app_builder.run_polling()
+    await app_builder.initialize()
+    await app_builder.start()
+    print("✅ Telegram Bot Started")
+    await asyncio.Event().wait()  # պահում է բոտը աշխատող վիճակում
+
+async def start_server():
+    """Uvicorn FastAPI սերվեր"""
+    config = uvicorn.Config(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
+    server = uvicorn.Server(config)
+    await server.serve()
 
 async def main():
-    bot_task = asyncio.create_task(run_bot())
-    server_task = asyncio.create_task(
-        uvicorn.Server(
-            uvicorn.Config(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
-        ).serve()
-    )
+    bot_task = asyncio.create_task(start_bot())
+    server_task = asyncio.create_task(start_server())
     await asyncio.gather(bot_task, server_task)
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
 
