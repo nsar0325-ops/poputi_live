@@ -12,7 +12,6 @@ import uvicorn
 # === ԿԱՐԳԱՎՈՐՈՒՄՆԵՐ ===
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8542625753:AAFS4Hd7gNCm8_KbjX-biMAf2HIkN-pApc4")
 ADMINS = [int(x) for x in os.environ.get("ADMINS", "6517716621,1105827301").split(",")]
-REDIRECT_URL = "https://poputi.am"
 BASE_URL = "https://poputi-live.onrender.com"
 
 bot = Bot(token=BOT_TOKEN)
@@ -20,8 +19,9 @@ AM_TZ = pytz.timezone("Asia/Yerevan")
 
 
 def get_armenia_time():
-    """Վերադարձնում է Հայաստանի ընթացիկ ժամը ձևաչափով YYYY-MM-DD HH:MM:SS"""
-    now_am = datetime.now(AM_TZ)
+    """Վերադարձնում է Հայաստանի ընթացիկ ժամը ճիշտ ձևաչափով"""
+    utc_now = datetime.utcnow().replace(tzinfo=pytz.utc)
+    now_am = utc_now.astimezone(AM_TZ)
     return now_am.strftime("%Y-%m-%d %H:%M:%S")
 
 
@@ -65,33 +65,35 @@ async def redirect_user(request: Request, uid: str = None):
     ua = request.headers.get("user-agent", "unknown").lower()
     ts = get_armenia_time()
 
+    # գրանցում բազայում
     conn = sqlite3.connect("main.db")
     cur = conn.cursor()
     cur.execute("INSERT INTO clicks (uid, ip, ua, timestamp) VALUES (?, ?, ?, ?)", (uid, ip, ua, ts))
     conn.commit()
     conn.close()
 
-    msg = f"🔗 Նոր հղման սեղմում\n🆔 UID: {uid or 'Չկա'}\n🌍 IP: {ip}\n🕒 Ժամանակ՝ {ts}"
+    # ծանուցում ադմիններին
+    msg = f"🔔 Նոր հղման սեղմում!\n🆔 User ID: {uid or 'Չկա'}\n🌍 IP: {ip}\n🕒 Ժամանակ՝ {ts}"
     for admin in ADMINS:
         try:
             await bot.send_message(chat_id=admin, text=msg)
         except Exception as e:
             print(f"Can't notify admin {admin}: {e}")
 
-    # === սարքի տեսակն ենք որոշում
+    # սարքի որոշում
     if "android" in ua:
-        # Android deep link intent
+        # Android intent link
         deeplink = (
-            "intent://open?uid={uid}#Intent;"
+            f"intent://open?uid={uid or '0'}#Intent;"
             "scheme=poputi;"
             "package=com.poputi.share4car;"
             "S.browser_fallback_url=https://play.google.com/store/apps/details?id=com.poputi.share4car;"
             "end"
-        ).format(uid=uid or "0")
+        )
         return RedirectResponse(url=deeplink)
 
     elif "iphone" in ua or "ipad" in ua:
-        # iOS Universal Link — redirect + fallback
+        # iOS deep link + fallback
         deeplink = f"poputi://open?uid={uid or '0'}"
         html = f"""
         <html>
@@ -111,7 +113,7 @@ async def redirect_user(request: Request, uid: str = None):
         return HTMLResponse(content=html)
 
     else:
-        # Եթե desktop է կամ անճանաչելի սարք՝ բացում է կայքը
+        # desktop սարքերի համար
         return RedirectResponse(url="https://poputi.am")
 
 
@@ -121,6 +123,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     ts = get_armenia_time()
 
+    # պահպանում բազայում
     conn = sqlite3.connect("main.db")
     cur = conn.cursor()
     cur.execute("""
@@ -130,11 +133,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn.commit()
     conn.close()
 
-    # Ծանուցում ադմիններին
+    # ծանուցում ադմիններին
     msg = (
-        f"👤 Նոր օգտատեր\n"
-        f"🆔 ID: {user.id}\n"
-        f"👨‍💻 Username: @{user.username}\n"
+        f"🟢 Նոր մուտք Telegram բոտում\n"
+        f"👤 @{user.username or 'առանց username'} (ID: {user.id})\n"
+        f"Անուն: {user.first_name or ''} {user.last_name or ''}\n"
         f"🕒 Ժամանակ՝ {ts}"
     )
     for admin in ADMINS:
@@ -143,7 +146,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             print(f"Can't notify admin {admin}: {e}")
 
-    # ✅ Հղումը դեպի հավելված / կայք
+    # հղումը դեպի հավելված կամ կայք
     text = (
         f"Բարև {user.first_name or user.username or 'օգտատեր'} 👋\n\n"
         f"Poputi հավելվածը բացելու համար սեղմիր 👉 {BASE_URL}?uid={user.id}"
@@ -170,3 +173,5 @@ if __name__ == "__main__":
         await asyncio.gather(bot_task, server_task)
 
     asyncio.run(main())
+
+
