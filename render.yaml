@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: poputi-live
+    env: python
+    buildCommand: ""
+    startCommand: "python bot.py"
+    envVars:
+      - key: BOT_TOKEN
+        value: 8542625753:AAFS4Hd7gNCm8_KbjX-biMAf2HIkN-pApc4
+      - key: ADMINS
+        value: 6517716621,1105827301
+    plan: free
+    autoDeploy: true
