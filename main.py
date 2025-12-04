@@ -1,124 +1,36 @@
 import asyncio
 import os
-import sqlite3
 from datetime import datetime
+from telegram import Bot
 import pytz
-from fastapi import FastAPI
-from fastapi.responses import HTMLResponse
-from telegram import Update, Bot
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
-import uvicorn
 
 # === ԿԱՐԳԱՎՈՐՈՒՄՆԵՐ ===
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8542625753:AAFS4Hd7gNCm8_KbjX-biMAf2HIkN-pApc4")
-ADMINS = [int(x) for x in os.environ.get("ADMINS", "6517716621,1105827301").split(",") if x.strip()]
-BASE_URL = "https://short.poputi.am"
+ADMINS = [int(x) for x in os.environ.get("ADMINS", "6517716621,1105827301").split(",")]
 AM_TZ = pytz.timezone("Asia/Yerevan")
 
-bot = Bot(token=BOT_TOKEN)
-
-# === ԺԱՄԱՆԱԿ ===
-def get_armenia_time():
+def get_arm_time():
     return datetime.now(pytz.utc).astimezone(AM_TZ).strftime("%Y-%m-%d %H:%M:%S")
 
-# === ՏՎՅԱԼՆԵՐԻ ԲԱԶԱ ===
-def init_db():
-    conn = sqlite3.connect("main.db")
-    cur = conn.cursor()
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS visits (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
-            username TEXT,
-            first_name TEXT,
-            last_name TEXT,
-            timestamp TEXT
-        )
-    """)
-    conn.commit()
-    conn.close()
-
-init_db()
-
-# === FASTAPI APP ===
-app = FastAPI()
-
-@app.get("/", response_class=HTMLResponse)
-async def home():
-    return HTMLResponse("""
-    <html>
-    <head><title>Poputi Live</title></head>
-    <body style='text-align:center; font-family:Arial; margin-top:60px;'>
-        <h2>✅ Poputi Bot Live է</h2>
-        <p>Բոտը հաջողությամբ աշխատում է Render-ի վրա։</p>
-    </body>
-    </html>
-    """)
-
-# === TELEGRAM ԲՈՏ ===
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    ts = get_armenia_time()
-    print(f"👤 Նոր մուտք՝ {user.first_name} | ID: {user.id}")
-
-    # Բազայում գրանցում
-    conn = sqlite3.connect("main.db")
-    cur = conn.cursor()
-    cur.execute("""
-        INSERT INTO visits (user_id, username, first_name, last_name, timestamp)
-        VALUES (?, ?, ?, ?, ?)
-    """, (user.id, user.username, user.first_name, user.last_name, ts))
-    conn.commit()
-    conn.close()
-
-    # Ծանուցում ադմիններին
-    admin_msg = (
-        f"🟢 Նոր մուտք Telegram բոտում\n"
-        f"👤 @{user.username or 'առանց username'} (ID: {user.id})\n"
-        f"Անուն: {user.first_name or ''} {user.last_name or ''}\n"
-        f"🕒 Ժամանակ՝ {ts}"
-    )
+async def main():
+    bot = Bot(token=BOT_TOKEN)
+    ts = get_arm_time()
 
     for admin in ADMINS:
         try:
-            print(f"📨 Փորձում եմ ուղարկել ծանուցում admin {admin}-ին...")
-            await bot.send_message(chat_id=admin, text=admin_msg)
-            print(f"✅ Ծանուցումը հաջողությամբ ուղարկվեց {admin}-ին")
+            # Բերում ենք ադմինի տվյալները՝ username-ի համար
+            admin_info = await bot.get_chat(admin)
+            username = admin_info.username or "օգտատեր"
+
+            msg = f"Բարև @{username} 👋\nՀավելվածը բացելու համար սեղմիր 👉 https://short.poputi.am"
+
+            await bot.send_message(chat_id=admin, text=msg)
+            print(f"✅ Ծանուցումը ուղարկվեց @{username} ({admin})՝ {ts}")
         except Exception as e:
-            print(f"❌ Չհաջողվեց ուղարկել {admin}-ին։ Սխալ՝ {e}")
-
-    # Պատասխան օգտատիրոջը
-    text = (
-        f"Բարև {user.first_name or 'օգտատեր'} 👋\n\n"
-        f"Հավելվածը բացելու համար սեղմիր 👉 {BASE_URL}"
-    )
-    await update.message.reply_text(text)
-    print(f"📤 Պատասխան ուղարկվեց {user.id}-ին։")
-
-# === ԳԼԽԱՎՈՐ ՖՈՒՆԿՑԻԱՆԵՐ ===
-async def start_bot():
-    """Բոտը գործարկվում է առանձին asyncio task-ում առանց event loop փակելու"""
-    app_builder = ApplicationBuilder().token(BOT_TOKEN).build()
-    app_builder.add_handler(CommandHandler("start", start))
-    await app_builder.initialize()
-    await app_builder.start()
-    print("✅ Telegram Bot Started")
-    await asyncio.Event().wait()  # պահում է բոտը աշխատող վիճակում
-
-async def start_server():
-    """Uvicorn FastAPI սերվեր"""
-    config = uvicorn.Config(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
-    server = uvicorn.Server(config)
-    await server.serve()
-
-async def main():
-    bot_task = asyncio.create_task(start_bot())
-    server_task = asyncio.create_task(start_server())
-    await asyncio.gather(bot_task, server_task)
+            print(f"⚠️ Չհաջողվեց ուղարկել admin-ին ({admin}): {e}")
 
 if __name__ == "__main__":
     asyncio.run(main())
-
 
 
 
