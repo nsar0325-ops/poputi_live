@@ -2,22 +2,21 @@ import asyncio
 import sqlite3
 from datetime import datetime
 import os
+import pytz
 from fastapi import FastAPI, Request
 from fastapi.responses import RedirectResponse
 from telegram import Update, Bot
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
-import pytz  # Armenia timezone-ի համար
 
 # === ԿԱՐԳԱՎՈՐՈՒՄՆԵՐ ===
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8542625753:AAFS4Hd7gNCm8_KbjX-biMAf2HIkN-pApc4")
 ADMINS = [int(x) for x in os.environ.get("ADMINS", "6517716621,1105827301").split(",")]
-REDIRECT_URL = "https://poputi.am"  # Վերջնական կայք
-BASE_URL = "https://poputi-live.onrender.com"  # Render-ի հղումը
+REDIRECT_URL = "https://poputi.am"
+BASE_URL = "https://poputi-live.onrender.com"
 
 bot = Bot(token=BOT_TOKEN)
-AM_TZ = pytz.timezone("Asia/Yerevan")  # ✅ Հայաստանի ժամային գոտի
+AM_TZ = pytz.timezone("Asia/Yerevan")
 
-# === ԺԱՄԱՆԱԿԱՅԻՆ ՖՈՒՆԿՑԻԱ ===
 def get_armenia_time():
     now_am = datetime.now(AM_TZ)
     return now_am.strftime("%Y-%m-%d %H:%M:%S")
@@ -50,11 +49,12 @@ def init_db():
 
 init_db()
 
-# === FASTAPI ===
+# === FASTAPI APP ===
 app = FastAPI()
 
 @app.get("/")
 async def redirect_user(request: Request, uid: str = None):
+    """Գրանցում է հղման սեղմումը և տեղափոխում Poputi կայք"""
     ip = request.client.host
     ua = request.headers.get("user-agent", "unknown")
     ts = get_armenia_time()
@@ -72,11 +72,11 @@ async def redirect_user(request: Request, uid: str = None):
         except Exception as e:
             print(f"Can't notify admin {admin}: {e}")
 
-    # ✅ Վերաուղղում դեպի Poputi կայք
     return RedirectResponse(url=REDIRECT_URL)
 
 # === TELEGRAM ԲՈՏ ===
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Գրանցում է օգտատիրոջ մուտքը և ուղարկում է պարզ հաղորդագրություն"""
     user = update.effective_user
     ts = get_armenia_time()
 
@@ -89,6 +89,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn.commit()
     conn.close()
 
+    # Ծանուցում ադմիններին
     msg = (
         f"👤 Նոր օգտատեր\n"
         f"🆔 ID: {user.id}\n"
@@ -101,14 +102,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             print(f"Can't notify admin {admin}: {e}")
 
-    # ✅ Telegram հավելվածի deep link
-    bot_username = (await context.bot.get_me()).username
-    deep_link = f"tg://resolve?domain={bot_username}&start={user.id}"
-
+    # ✅ Ուղարկվող հաղորդագրությունը
     text = (
         f"Բարև {user.first_name or user.username or 'օգտատեր'} 👋\n"
-        f"Բացիր Poputi հավելվածը 👉 {deep_link}\n\n"
-        f"Եթե չի բացվում հավելվածը՝ բացիր վեբ տարբերակը 👉 {BASE_URL}/?uid={user.id}"
+        f"Հավելվածը բացելու համար սեղմիր 👉 {BASE_URL}?uid={user.id}"
     )
 
     await update.message.reply_text(text)
@@ -132,4 +129,5 @@ if __name__ == "__main__":
         await asyncio.gather(bot_task, server_task)
 
     asyncio.run(main())
+
 
