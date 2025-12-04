@@ -1,6 +1,6 @@
 import asyncio
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 import os
 from fastapi import FastAPI, Request
 from fastapi.responses import RedirectResponse
@@ -10,10 +10,16 @@ from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 # === ԿԱՐԳԱՎՈՐՈՒՄՆԵՐ ===
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8542625753:AAFS4Hd7gNCm8_KbjX-biMAf2HIkN-pApc4")
 ADMINS = [int(x) for x in os.environ.get("ADMINS", "6517716621,1105827301").split(",")]
-REDIRECT_URL = "https://poputi.am"  # վերջնական կայք
+REDIRECT_URL = "https://poputi.am"  # Վերջնական կայք
 BASE_URL = "https://poputi-live.onrender.com"  # Render-ի հղումը
 
 bot = Bot(token=BOT_TOKEN)
+
+# === ԺԱՄԱԳՐԱՖԻԿ՝ Հայաստան (UTC+4) ===
+ARMENIA_TZ = timezone(timedelta(hours=4))
+
+def get_armenia_time():
+    return datetime.now(ARMENIA_TZ).strftime("%Y-%m-%d %H:%M:%S")
 
 # === ՏՎՅԱԼՆԵՐԻ ԲԱԶԱ ===
 def init_db():
@@ -52,7 +58,7 @@ async def redirect_user(request: Request, uid: str = None):
     """Գրանցում է հղման սեղմումը և տեղափոխում Poputi կայք"""
     ip = request.client.host
     ua = request.headers.get("user-agent", "unknown")
-    ts = datetime.utcnow().isoformat()
+    ts = get_armenia_time()
 
     conn = sqlite3.connect("main.db")
     cur = conn.cursor()
@@ -68,14 +74,14 @@ async def redirect_user(request: Request, uid: str = None):
         except Exception as e:
             print(f"Can't notify admin {admin}: {e}")
 
-    # Վերաուղղում դեպի Poputi
+    # Վերաուղղում դեպի Poputi.am
     return RedirectResponse(url=REDIRECT_URL)
 
 # === TELEGRAM ԲՈՏ ===
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Գրանցում է օգտատիրոջ մուտքը և ուղարկում է հղումը"""
     user = update.effective_user
-    ts = datetime.utcnow().isoformat()
+    ts = get_armenia_time()
 
     conn = sqlite3.connect("main.db")
     cur = conn.cursor()
@@ -99,8 +105,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             print(f"Can't notify admin {admin}: {e}")
 
-    # Ուղարկում է հղումը օգտատիրոջը
-    text = f"Բարև {user.first_name or user.username or 'օգտատեր'} 👋\nՍեղմիր այստեղ 👉 {BASE_URL}/?uid={user.id}"
+    # Telegram հղումը, որը բացվում է հենց հավելվածում
+    deep_link = f"tg://resolve?domain={context.bot.username}&start={user.id}"
+
+    text = (
+        f"Բարև {user.first_name or user.username or 'օգտատեր'} 👋\n"
+        f"Սեղմիր այստեղ Poputi բացելու համար 👉 {deep_link}\n\n"
+        f"Կամ եթե չբացվի՝ օգտագործիր վեբ տարբերակը 👉 {BASE_URL}/?uid={user.id}"
+    )
+
     await update.message.reply_text(text)
 
 async def run_bot():
@@ -123,4 +136,5 @@ if __name__ == "__main__":
         await asyncio.gather(bot_task, server_task)
 
     asyncio.run(main())
+
 
