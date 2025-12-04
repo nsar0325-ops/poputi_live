@@ -16,10 +16,9 @@ AM_TZ = pytz.timezone("Asia/Yerevan")
 bot = Bot(token=BOT_TOKEN)
 
 def get_time():
-    """Հայաստանի ժամային գոտու ընթացիկ ժամանակը"""
     return datetime.now(pytz.utc).astimezone(AM_TZ).strftime("%Y-%m-%d %H:%M:%S")
 
-# === ՏՎՅԱԼՆԵՐԻ ԲԱԶԱ (ըստ ցանկության) ===
+# === ՏՎՅԱԼՆԵՐԻ ԲԱԶԱ ===
 def init_db():
     conn = sqlite3.connect("clicks.db")
     c = conn.cursor()
@@ -27,6 +26,7 @@ def init_db():
         CREATE TABLE IF NOT EXISTS clicks (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             uid TEXT,
+            username TEXT,
             ip TEXT,
             ua TEXT,
             timestamp TEXT
@@ -37,35 +37,34 @@ def init_db():
 
 init_db()
 
-# === FASTAPI ՍԵՐՎԵՐ ===
+# === FASTAPI ===
 app = FastAPI()
 
 @app.get("/")
-async def root(request: Request, uid: str = None, username: str = None):
+async def handle_click(request: Request, uid: str = None, username: str = None):
     """Գրանցում է սեղմումը և ուղարկում է ծանուցում ադմինին"""
     ip = request.client.host
     ua = request.headers.get("user-agent", "")
     ts = get_time()
 
-    # պահպանում ենք սեղմումը բազայում
     conn = sqlite3.connect("clicks.db")
     c = conn.cursor()
-    c.execute("INSERT INTO clicks (uid, ip, ua, timestamp) VALUES (?, ?, ?, ?)", (uid, ip, ua, ts))
+    c.execute("INSERT INTO clicks (uid, username, ip, ua, timestamp) VALUES (?, ?, ?, ?, ?)",
+              (uid, username, ip, ua, ts))
     conn.commit()
     conn.close()
 
-    # պատրաստում ենք հաղորդագրությունը
-    user_text = f"@{username}" if username else f"ID: {uid or 'անհայտ'}"
+    user_text = f"@{username}" if username else f"ID {uid or 'անհայտ'}"
     msg = f"🔔 Նոր սեղմում!\n👤 {user_text}\n🌍 IP: {ip}\n🕒 Ժամանակ՝ {ts}"
 
-    # ուղարկում ենք ադմինին
+    # ուղարկում ենք ադմինին մեկ անգամ
     for admin in ADMINS:
         try:
             await bot.send_message(chat_id=admin, text=msg)
         except Exception as e:
             print(f"Can't notify admin {admin}: {e}")
 
-    # վերադարձնում ենք HTML պատասխան
+    # վերադարձնում ենք redirect էջ
     html = f"""
     <html>
     <head><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
@@ -83,9 +82,10 @@ async def root(request: Request, uid: str = None, username: str = None):
     return HTMLResponse(content=html)
 
 
-# === ԳԼԽԱՎՈՐ ՖՈՒՆԿՑԻԱ ===
+# === ԳԼԽԱՎՈՐ ===
 if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8000))
     print(f"🌐 Server running on http://0.0.0.0:{port}")
     uvicorn.run(app, host="0.0.0.0", port=port)
+
